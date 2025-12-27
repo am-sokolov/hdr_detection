@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GPU Texture Capability Detector</title>
+    <meta
+      name="description"
+      content="Detect WebGPU/WebGL texture format support (LDR + HDR), compression formats, and key limits."
+    />
+    <meta name="theme-color" content="#0b0d12" />
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0b0d12',
+              card: '#121624',
+              'card-elevated': '#1a1f32',
+              muted: '#9aa3b2',
+              'text-primary': '#e8ecf3',
+              'text-dim': '#7a8494',
+              border: 'rgba(255, 255, 255, 0.08)',
+              'border-hover': 'rgba(255, 255, 255, 0.15)',
+              accent: '#7aa2ff',
+              'accent-dim': 'rgba(122, 162, 255, 0.6)',
+              good: '#43d08a',
+              'good-dim': 'rgba(67, 208, 138, 0.15)',
+              bad: '#ff5c7a',
+              'bad-dim': 'rgba(255, 92, 122, 0.15)',
+              warn: '#ffc86b',
+              'warn-dim': 'rgba(255, 200, 107, 0.15)',
+            },
+            fontFamily: {
+              sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+              mono: ['ui-monospace', 'SF Mono', 'Cascadia Code', 'Consolas', 'monospace'],
+            },
+            boxShadow: {
+              'card': '0 12px 40px rgba(0, 0, 0, 0.35)',
+              'card-sm': '0 4px 12px rgba(0, 0, 0, 0.25)',
+            },
+            animation: {
+              'shimmer': 'shimmer 1.5s infinite',
+              'toast-in': 'toastIn 0.3s ease',
+              'toast-out': 'toastOut 0.3s ease forwards',
+              'slide-down': 'slideDown 0.2s ease',
+            },
+            keyframes: {
+              shimmer: {
+                '0%': { transform: 'translateX(-100%)' },
+                '100%': { transform: 'translateX(100%)' },
+              },
+              toastIn: {
+                from: { opacity: '0', transform: 'translateX(100%)' },
+                to: { opacity: '1', transform: 'translateX(0)' },
+              },
+              toastOut: {
+                from: { opacity: '1', transform: 'translateX(0)' },
+                to: { opacity: '0', transform: 'translateX(100%)' },
+              },
+              slideDown: {
+                from: { opacity: '0', transform: 'translateY(-8px)' },
+                to: { opacity: '1', transform: 'translateY(0)' },
+              },
+            },
+          },
+        },
+      }
+    </script>
+    <style type="text/tailwindcss">
+      @layer base {
+        body {
+          @apply bg-bg text-text-primary antialiased;
+          background-image:
+            radial-gradient(1200px 900px at 10% 0%, rgba(122, 162, 255, 0.18), transparent 60%),
+            radial-gradient(900px 700px at 90% 10%, rgba(67, 208, 138, 0.12), transparent 55%);
+        }
+      }
+      @layer components {
+        /* Progress bar shimmer */
+        .progress-shimmer::after {
+          content: '';
+          @apply absolute inset-0;
+          background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+          animation: shimmer 1.5s infinite;
+        }
+        /* Table sorting */
+        .sortable {
+          @apply cursor-pointer transition-colors hover:text-accent;
+        }
+        .sorted-asc::after {
+          content: ' \2191';
+          @apply text-accent;
+        }
+        .sorted-desc::after {
+          content: ' \2193';
+          @apply text-accent;
+        }
+        /* Details/accordion */
+        details summary {
+          @apply cursor-pointer text-accent text-sm font-medium py-2 transition-colors list-none flex items-center gap-2;
+        }
+        details summary::-webkit-details-marker {
+          display: none;
+        }
+        details summary::before {
+          content: '\25B6';
+          @apply text-[10px] transition-transform duration-200;
+        }
+        details[open] summary::before {
+          transform: rotate(90deg);
+        }
+        details summary:hover {
+          @apply text-text-primary;
+        }
+        details > *:not(summary) {
+          @apply animate-slide-down;
+        }
+      }
+      @layer utilities {
+        .sr-only {
+          @apply absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0;
+          clip: rect(0, 0, 0, 0);
+        }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen text-sm leading-relaxed">
+    <header class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-5 px-4 lg:px-6 py-6 max-w-6xl mx-auto">
+      <div class="header__title">
+        <h1 class="m-0 mb-2 text-2xl font-bold tracking-tight bg-gradient-to-br from-text-primary to-accent bg-clip-text text-transparent">
+          GPU Texture Capability Detector
+        </h1>
+        <p class="m-0 text-sm text-muted max-w-lg">
+          Detects WebGPU texture formats (LDR + HDR) and WebGL texture/extension capabilities for your browser and device.
+        </p>
+      </div>
+      <div class="flex flex-wrap gap-3 items-center justify-end w-full lg:w-auto">
+        <!-- PRIMARY ACTION BUTTON - Large and prominent -->
+        <button id="runBtn" class="inline-flex items-center justify-center gap-3 px-8 py-4 text-base font-semibold rounded-xl bg-accent/20 border-2 border-accent/50 text-accent hover:bg-accent/30 hover:border-accent/70 hover:shadow-lg hover:shadow-accent/20 hover:-translate-y-0.5 transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" aria-describedby="runBtnDesc">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6" aria-hidden="true">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <span>Run Detection</span>
+        </button>
+        <span id="runBtnDesc" class="sr-only">Start GPU capability detection</span>
+        <button id="copyBtn" class="inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-medium rounded-xl border border-border bg-white/5 text-text-primary hover:bg-white/10 hover:border-border-hover hover:-translate-y-0.5 transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap" disabled aria-label="Copy results as JSON">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          <span>Copy JSON</span>
+        </button>
+        <button id="downloadBtn" class="inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-medium rounded-xl border border-border bg-white/5 text-text-primary hover:bg-white/10 hover:border-border-hover hover:-translate-y-0.5 transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap" disabled aria-label="Download results as JSON file">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Download</span>
+        </button>
+        <a class="inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-medium rounded-xl border border-border bg-white/5 text-text-primary hover:bg-white/10 hover:border-border-hover hover:-translate-y-0.5 transition-all duration-200 cursor-pointer no-underline whitespace-nowrap" href="/stats.html" aria-label="View collected statistics">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5" aria-hidden="true">
+            <line x1="18" y1="20" x2="18" y2="10"></line>
+            <line x1="12" y1="20" x2="12" y2="4"></line>
+            <line x1="6" y1="20" x2="6" y2="14"></line>
+          </svg>
+          <span>Statistics</span>
+        </a>
+      </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 lg:px-6 pb-12 grid gap-4">
+      <!-- Quick Status Summary -->
+      <section class="bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5 transition-colors hover:border-border-hover" aria-labelledby="statusHeading">
+        <h2 id="statusHeading" class="sr-only">Quick Status Summary</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          <!-- Secure Context -->
+          <div id="secureContextItem" class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span>Secure</span>
+            </div>
+            <div id="secureContext" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+          <!-- WebGPU -->
+          <div id="webgpuItem" class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                <rect x="9" y="9" width="6" height="6"></rect>
+                <line x1="9" y1="1" x2="9" y2="4"></line>
+                <line x1="15" y1="1" x2="15" y2="4"></line>
+              </svg>
+              <span>WebGPU</span>
+            </div>
+            <div id="webgpuStatus" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+          <!-- WebGL 2 -->
+          <div id="webgl2Item" class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+              <span>WebGL 2</span>
+            </div>
+            <div id="webgl2Status" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+          <!-- HDR Display -->
+          <div id="dynamicRangeItem" class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+              </svg>
+              <span>HDR</span>
+            </div>
+            <div id="dynamicRange" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+          <!-- Color Gamut -->
+          <div id="colorGamutItem" class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <circle cx="13.5" cy="6.5" r="4.5"></circle>
+                <circle cx="17.5" cy="14.5" r="4.5"></circle>
+                <circle cx="8.5" cy="13.5" r="4.5"></circle>
+              </svg>
+              <span>Gamut</span>
+            </div>
+            <div id="colorGamut" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+          <!-- Browser -->
+          <div class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+              <span>Browser</span>
+            </div>
+            <div id="browserSummary" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+          <!-- OS -->
+          <div class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+              <span>OS</span>
+            </div>
+            <div id="osSummary" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+          <!-- Device -->
+          <div class="flex flex-col gap-1.5 p-3.5 bg-black/20 rounded-xl border border-border transition-all hover:bg-black/25 hover:border-border-hover">
+            <div class="text-[11px] uppercase tracking-wide text-muted flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 opacity-70 shrink-0" aria-hidden="true">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                <line x1="12" y1="18" x2="12.01" y2="18"></line>
+              </svg>
+              <span>Device</span>
+            </div>
+            <div id="deviceSummary" class="text-[15px] font-semibold flex items-center gap-2">-</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Progress Section (hidden by default) -->
+      <section id="progressSection" class="bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5 transition-colors hover:border-border-hover" style="display: none;" aria-live="polite">
+        <h2 class="m-0 mb-3 text-base font-semibold flex items-center gap-2.5">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-accent animate-spin" aria-hidden="true">
+            <line x1="12" y1="2" x2="12" y2="6"></line>
+            <line x1="12" y1="18" x2="12" y2="22"></line>
+            <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
+            <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
+            <line x1="2" y1="12" x2="6" y2="12"></line>
+            <line x1="18" y1="12" x2="22" y2="12"></line>
+            <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
+            <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
+          </svg>
+          Running Detection
+        </h2>
+        <div class="w-full h-1.5 bg-black/30 rounded-full overflow-hidden my-3">
+          <div id="progressBar" class="h-full bg-gradient-to-r from-accent to-good rounded-full transition-all duration-300 relative progress-shimmer" style="width: 0%;" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+        </div>
+        <p id="progressText" class="text-xs text-muted mt-1.5">Initializing...</p>
+      </section>
+
+      <!-- Client / Device Detection -->
+      <section class="bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5 transition-colors hover:border-border-hover" aria-labelledby="clientHeading">
+        <h2 id="clientHeading" class="m-0 mb-3 text-base font-semibold flex items-center gap-2.5">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-accent" aria-hidden="true">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          Client / Device Detection
+        </h2>
+        <p class="text-muted text-[13px] my-2 leading-relaxed">
+          Combines User-Agent string, User-Agent Client Hints (<code class="font-mono text-[0.9em] text-[#d7deff] bg-accent/10 px-1.5 py-0.5 rounded">navigator.userAgentData</code>), feature detection,
+          and display/hardware signals. Values can be reduced by privacy protections.
+        </p>
+        <div id="clientInfoStructured" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" style="display: none;">
+          <!-- Populated by JS -->
+        </div>
+        <details class="mt-3" id="clientInfoDetails">
+          <summary>Raw JSON Data</summary>
+          <pre id="clientInfo" class="m-0 whitespace-pre-wrap break-words p-3.5 rounded-xl border border-border bg-black/25 font-mono text-xs leading-relaxed max-h-96 overflow-auto text-muted">Run detection to see client information.</pre>
+        </details>
+      </section>
+
+      <!-- Filters -->
+      <section class="bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5 transition-colors hover:border-border-hover" aria-labelledby="filterHeading">
+        <h2 id="filterHeading" class="sr-only">Filter Options</h2>
+        <div class="flex flex-wrap items-center gap-4">
+          <label class="grid gap-1.5 min-w-[280px] flex-1">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Search formats</span>
+            <input id="searchInput" class="border border-border bg-black/30 text-text-primary rounded-xl px-3.5 py-3 text-sm outline-none transition-all hover:border-border-hover focus:border-accent focus:shadow-[0_0_0_4px_rgba(122,162,255,0.15)] focus:bg-black/35 placeholder:text-text-dim" type="search" placeholder="e.g. rgba16float, astc-8x8..." aria-label="Search texture formats" />
+          </label>
+          <label class="flex items-center gap-2 pt-5 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+            <input id="supportedOnly" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+            <span>Supported only</span>
+          </label>
+          <label class="flex items-center gap-2 pt-5 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+            <input id="hdrOnly" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+            <span>HDR only</span>
+          </label>
+          <label class="flex items-center gap-2 pt-5 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+            <input id="compressedOnly" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+            <span>Compressed only</span>
+          </label>
+          <div class="flex-1"></div>
+          <div id="runStatus" class="flex items-center gap-2 text-[13px] text-muted" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- WebGPU Texture Formats -->
+      <section class="bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5 transition-colors hover:border-border-hover" aria-labelledby="webgpuFormatsHeading">
+        <div class="flex justify-between items-center mb-3">
+          <h2 id="webgpuFormatsHeading" class="m-0 text-base font-semibold flex items-center gap-2.5">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-accent" aria-hidden="true">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+            WebGPU Texture Formats
+          </h2>
+          <div id="formatCount" class="text-[13px] text-muted"></div>
+        </div>
+        <p class="text-muted text-[13px] my-2 leading-relaxed">
+          Each format is actively validated on this device by attempting to create textures and bindings. Some formats require optional WebGPU features (e.g. compression families).
+        </p>
+        <!-- Column explanations -->
+        <div class="text-[12px] text-muted leading-relaxed mb-3 p-3 rounded-lg bg-black/20 border border-border">
+          <span class="font-semibold text-[#cbd3e7]">Columns:</span>
+          <span class="text-text-dim">Format</span> — texture format name;
+          <span class="text-text-dim">Type</span> — color/depth/stencil/compressed;
+          <span class="text-text-dim">HDR</span> — supports values beyond 0–1 range;
+          <span class="text-text-dim">Sampled</span> — readable in shaders;
+          <span class="text-text-dim">Filterable</span> — hardware filtering (bilinear/trilinear);
+          <span class="text-text-dim">Renderable</span> — usable as render target;
+          <span class="text-text-dim">Storage</span> — read/write in compute shaders.
+        </div>
+        <div class="overflow-auto border border-border rounded-xl bg-black/15">
+          <table class="w-full border-collapse min-w-[860px] text-[13px]" id="webgpuTable" aria-describedby="webgpuTableDesc">
+            <caption id="webgpuTableDesc" class="sr-only">
+              WebGPU texture formats with support flags.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="format">Format</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="type">Type</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="hdr">HDR</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="sampled">Sampled</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="filterable">Filterable</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="renderable">Renderable</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="storage">Storage</th>
+              </tr>
+            </thead>
+            <tbody id="webgpuTbody">
+              <tr>
+                <td colspan="7" class="p-0">
+                  <div class="text-center py-12 px-6 text-muted">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-12 h-12 mx-auto mb-4 opacity-50" aria-hidden="true">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    <div class="text-base font-semibold text-text-primary mb-2">No Detection Results Yet</div>
+                    <div class="text-sm max-w-xs mx-auto">Click "Run Detection" to analyze your GPU's texture format capabilities.</div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- WebGPU Adapter / Device -->
+      <section class="bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5 transition-colors hover:border-border-hover" aria-labelledby="adapterHeading">
+        <h2 id="adapterHeading" class="m-0 mb-3 text-base font-semibold flex items-center gap-2.5">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-accent" aria-hidden="true">
+            <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+            <rect x="9" y="9" width="6" height="6"></rect>
+            <line x1="9" y1="1" x2="9" y2="4"></line>
+            <line x1="15" y1="1" x2="15" y2="4"></line>
+            <line x1="9" y1="20" x2="9" y2="23"></line>
+            <line x1="15" y1="20" x2="15" y2="23"></line>
+            <line x1="20" y1="9" x2="23" y2="9"></line>
+            <line x1="20" y1="14" x2="23" y2="14"></line>
+            <line x1="1" y1="9" x2="4" y2="9"></line>
+            <line x1="1" y1="14" x2="4" y2="14"></line>
+          </svg>
+          WebGPU Adapter / Device
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <h3 class="my-3 text-[13px] font-semibold text-[#cbd3e7] uppercase tracking-wide">Features</h3>
+            <pre id="webgpuFeatures" class="m-0 whitespace-pre-wrap break-words p-3.5 rounded-xl border border-border bg-black/25 font-mono text-xs leading-relaxed max-h-96 overflow-auto text-muted">Run detection to see features.</pre>
+          </div>
+          <div>
+            <h3 class="my-3 text-[13px] font-semibold text-[#cbd3e7] uppercase tracking-wide">Limits</h3>
+            <pre id="webgpuLimits" class="m-0 whitespace-pre-wrap break-words p-3.5 rounded-xl border border-border bg-black/25 font-mono text-xs leading-relaxed max-h-96 overflow-auto text-muted">Run detection to see limits.</pre>
+          </div>
+        </div>
+        <details class="mt-3">
+          <summary>Adapter Info (if available)</summary>
+          <pre id="webgpuAdapterInfo" class="m-0 whitespace-pre-wrap break-words p-3.5 rounded-xl border border-border bg-black/25 font-mono text-xs leading-relaxed max-h-96 overflow-auto text-muted">Run detection to see adapter info.</pre>
+        </details>
+      </section>
+
+      <!-- WebGL Texture Capabilities -->
+      <section class="bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5 transition-colors hover:border-border-hover" aria-labelledby="webglHeading">
+        <h2 id="webglHeading" class="m-0 mb-3 text-base font-semibold flex items-center gap-2.5">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 text-accent" aria-hidden="true">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+          WebGL Texture Capabilities
+        </h2>
+        <p class="text-muted text-[13px] my-2 leading-relaxed">
+          WebGL reports capabilities via extensions and compressed texture enum lists. Values can be masked by privacy
+          protections.
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <h3 class="my-3 text-[13px] font-semibold text-[#cbd3e7] uppercase tracking-wide">WebGL 2</h3>
+            <div id="webgl2Structured" class="grid grid-cols-1 gap-4" style="display: none;">
+              <!-- Populated by JS -->
+            </div>
+            <details class="mt-3">
+              <summary>Raw JSON Data</summary>
+              <pre id="webgl2Info" class="m-0 whitespace-pre-wrap break-words p-3.5 rounded-xl border border-border bg-black/25 font-mono text-xs leading-relaxed max-h-96 overflow-auto text-muted">Run detection to see WebGL2 info.</pre>
+            </details>
+          </div>
+          <div>
+            <h3 class="my-3 text-[13px] font-semibold text-[#cbd3e7] uppercase tracking-wide">WebGL 1</h3>
+            <div id="webgl1Structured" class="grid grid-cols-1 gap-4" style="display: none;">
+              <!-- Populated by JS -->
+            </div>
+            <details class="mt-3">
+              <summary>Raw JSON Data</summary>
+              <pre id="webgl1Info" class="m-0 whitespace-pre-wrap break-words p-3.5 rounded-xl border border-border bg-black/25 font-mono text-xs leading-relaxed max-h-96 overflow-auto text-muted">Run detection to see WebGL1 info.</pre>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="max-w-6xl mx-auto px-4 lg:px-6 py-5 pb-8 border-t border-border text-[13px] text-muted">
+      <div>
+        <strong>Tip:</strong> For backend collection + stats, run <code class="font-mono text-[0.9em] text-[#d7deff] bg-accent/10 px-1.5 py-0.5 rounded">go run .</code> and open <code class="font-mono text-[0.9em] text-[#d7deff] bg-accent/10 px-1.5 py-0.5 rounded">http://localhost:8080</code>.
+        Static-only: <code class="font-mono text-[0.9em] text-[#d7deff] bg-accent/10 px-1.5 py-0.5 rounded">python3 -m http.server</code>.
+      </div>
+    </footer>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5" aria-live="polite" aria-atomic="true"></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

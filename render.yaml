@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: hdr-detection
+    runtime: go
+    plan: free
+    buildCommand: go build -o app .
+    startCommand: ./app
+    healthCheckPath: /healthz
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB
+        value: hdr_detection
