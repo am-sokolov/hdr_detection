@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Texture Compatibility Matrix</title>
+    <meta name="description" content="Compare texture format family support across device types, OSes, and browsers." />
+    <meta name="theme-color" content="#0b0d12" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              bg: '#0b0d12',
+              card: '#121624',
+              'card-elevated': '#1a1f32',
+              muted: '#9aa3b2',
+              'text-primary': '#e8ecf3',
+              'text-dim': '#7a8494',
+              border: 'rgba(255, 255, 255, 0.08)',
+              'border-hover': 'rgba(255, 255, 255, 0.15)',
+              accent: '#7aa2ff',
+              'accent-dim': 'rgba(122, 162, 255, 0.6)',
+              good: '#43d08a',
+              bad: '#ff5c7a',
+              warn: '#ffc86b',
+            },
+            fontFamily: {
+              sans: [
+                'ui-sans-serif',
+                'system-ui',
+                '-apple-system',
+                'Segoe UI',
+                'Roboto',
+                'Helvetica',
+                'Arial',
+                'sans-serif',
+              ],
+              mono: ['ui-monospace', 'SF Mono', 'Cascadia Code', 'Consolas', 'monospace'],
+            },
+            boxShadow: {
+              card: '0 12px 40px rgba(0, 0, 0, 0.35)',
+              'card-sm': '0 4px 12px rgba(0, 0, 0, 0.25)',
+            },
+            animation: {
+              'toast-in': 'toastIn 0.25s ease',
+              'toast-out': 'toastOut 0.25s ease forwards',
+              'slide-down': 'slideDown 0.2s ease',
+            },
+            keyframes: {
+              toastIn: {
+                from: { opacity: '0', transform: 'translateX(12px)' },
+                to: { opacity: '1', transform: 'translateX(0)' },
+              },
+              toastOut: {
+                from: { opacity: '1', transform: 'translateX(0)' },
+                to: { opacity: '0', transform: 'translateX(12px)' },
+              },
+              slideDown: {
+                from: { opacity: '0', transform: 'translateY(-8px)' },
+                to: { opacity: '1', transform: 'translateY(0)' },
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <style type="text/tailwindcss">
+      @layer base {
+        body {
+          @apply bg-bg text-text-primary antialiased;
+          background-image:
+            radial-gradient(1200px 900px at 10% 0%, rgba(122, 162, 255, 0.18), transparent 60%),
+            radial-gradient(900px 700px at 90% 10%, rgba(67, 208, 138, 0.12), transparent 55%);
+        }
+        a {
+          @apply text-accent hover:text-text-primary transition-colors;
+        }
+      }
+      @layer components {
+        .card {
+          @apply bg-gradient-to-b from-white/[0.035] to-white/[0.02] border border-border rounded-2xl shadow-card p-5;
+        }
+        .btn {
+          @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border border-border bg-white/5 text-text-primary hover:bg-white/10 hover:border-border-hover hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+        }
+        .btn--primary {
+          @apply border-accent/40 bg-accent/10 text-accent hover:bg-accent/15;
+        }
+        .badge {
+          @apply inline-flex items-center justify-center rounded-full px-2.5 py-0.5 border text-xs font-medium tabular-nums;
+        }
+        .badge--accent {
+          @apply border-accent/40 text-accent bg-accent/10;
+        }
+        .badge--good {
+          @apply border-good/40 text-good bg-good/15;
+        }
+        .badge--warn {
+          @apply border-warn/45 text-warn bg-warn/15;
+        }
+        .badge--bad {
+          @apply border-bad/40 text-bad bg-bad/15;
+        }
+        details summary {
+          @apply cursor-pointer text-accent text-sm font-medium py-2 transition-colors list-none flex items-center gap-2;
+        }
+        details summary::-webkit-details-marker {
+          display: none;
+        }
+        details summary::before {
+          content: '\25B6';
+          @apply text-[10px] transition-transform duration-200;
+        }
+        details[open] summary::before {
+          transform: rotate(90deg);
+        }
+        details > *:not(summary) {
+          @apply animate-slide-down;
+        }
+        .input {
+          @apply border border-border bg-black/30 text-text-primary rounded-xl px-3.5 py-3 text-sm outline-none transition-all hover:border-border-hover focus:border-accent focus:shadow-[0_0_0_4px_rgba(122,162,255,0.15)] placeholder:text-text-dim;
+        }
+        .select {
+          @apply border border-border bg-black/30 text-text-primary rounded-xl px-3.5 py-3 text-sm outline-none transition-all hover:border-border-hover focus:border-accent focus:shadow-[0_0_0_4px_rgba(122,162,255,0.15)] cursor-pointer;
+        }
+        .chip {
+          @apply inline-flex items-center gap-2 rounded-full px-3 py-1 border border-border bg-black/25 text-xs text-[#cbd3e7] transition-all;
+        }
+        .chip button {
+          @apply text-text-dim hover:text-text-primary;
+        }
+      }
+    </style>
+  </head>
+  <body class="min-h-screen text-sm leading-relaxed">
+    <header class="max-w-7xl mx-auto px-4 lg:px-6 py-6 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+      <div>
+        <h1 class="m-0 text-2xl font-bold tracking-tight bg-gradient-to-br from-text-primary to-accent bg-clip-text text-transparent">
+          Texture Compatibility Matrix
+        </h1>
+        <p class="m-0 mt-1 text-[13px] text-muted max-w-2xl">
+          Compare texture compression families across device types, OSes, and browsers. Cells show support rate within the tested subset.
+        </p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <a class="btn" href="/" aria-label="Back to detector">Detector</a>
+        <a class="btn" href="/stats" aria-label="Open stats">Stats</a>
+        <button id="copyCsvBtn" class="btn" type="button" disabled>Copy CSV</button>
+        <button id="clearFiltersBtn" class="btn" type="button">Reset Filters</button>
+        <button id="refreshBtn" class="btn btn--primary" type="button">Refresh</button>
+        <span id="compatStatus" class="badge badge--accent">Idle</span>
+      </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 lg:px-6 pb-12 grid gap-4">
+      <!-- Filters -->
+      <section class="card" aria-labelledby="filtersHeading">
+        <div class="flex flex-col lg:flex-row gap-3 lg:items-end lg:justify-between">
+          <div>
+            <h2 id="filtersHeading" class="m-0 text-base font-semibold">Segment</h2>
+            <p class="m-0 mt-1 text-[13px] text-muted">Filter the dataset before building the matrix.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-[12px] text-muted">Active:</span>
+            <div id="activeFilters" class="flex flex-wrap gap-2"></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Browser</span>
+            <select id="browserFilter" class="select" aria-label="Filter by browser"></select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">OS</span>
+            <select id="osFilter" class="select" aria-label="Filter by operating system"></select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Country</span>
+            <select id="countryFilter" class="select" aria-label="Filter by country"></select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Device Type</span>
+            <select id="deviceFilter" class="select" aria-label="Filter by device type"></select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">CPU Arch</span>
+            <select id="cpuFilter" class="select" aria-label="Filter by CPU architecture"></select>
+          </label>
+        </div>
+
+        <details class="mt-4">
+          <summary>Advanced filters</summary>
+          <div class="grid gap-4">
+            <div class="flex flex-wrap items-center gap-4">
+              <label class="flex items-center gap-2 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+                <input id="fWebgpuAvailable" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+                <span>WebGPU available</span>
+              </label>
+              <label class="flex items-center gap-2 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+                <input id="fWebgl2Available" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+                <span>WebGL2 available</span>
+              </label>
+              <label class="flex items-center gap-2 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+                <input id="fWebgl1Available" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+                <span>WebGL1 available</span>
+              </label>
+              <label class="flex items-center gap-2 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+                <input id="fAppleSilicon" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+                <span>Apple Silicon</span>
+              </label>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-muted">Required WebGPU feature(s)</span>
+                <input id="fWebgpuFeature" class="input" type="text" placeholder="texture-compression-astc, ..." />
+              </label>
+              <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-muted">Required WebGL2 extension(s)</span>
+                <input id="fWebgl2Ext" class="input" type="text" placeholder="WEBGL_compressed_texture_astc, ..." />
+              </label>
+              <label class="grid gap-1.5">
+                <span class="text-[11px] uppercase tracking-wide text-muted">Required WebGL1 extension(s)</span>
+                <input id="fWebgl1Ext" class="input" type="text" placeholder="OES_texture_float, ..." />
+              </label>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <!-- Matrix -->
+      <section class="card" aria-labelledby="matrixHeading">
+        <div class="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+          <div>
+            <h2 id="matrixHeading" class="m-0 text-base font-semibold">Compatibility Matrix</h2>
+            <p class="m-0 mt-1 text-[13px] text-muted">
+              Rows are texture families. Columns are device buckets. Percentages are computed as <span class="font-mono">supported / tested</span>.
+            </p>
+          </div>
+          <div id="matrixSummary" class="text-[13px] text-muted">-</div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mt-4">
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Group columns by</span>
+            <select id="groupBy" class="select">
+              <option value="device">Device type + OS + browser</option>
+              <option value="os_browser">OS + browser</option>
+              <option value="os">OS</option>
+              <option value="browser">Browser</option>
+              <option value="device_type">Device type</option>
+            </select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Support metric</span>
+            <select id="usage" class="select">
+              <option value="any">Any (sampled/renderable/storage)</option>
+              <option value="sampled">Sampled</option>
+              <option value="renderable">Renderable</option>
+              <option value="storage">Storage</option>
+              <option value="filterable">Filterable</option>
+            </select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Top device buckets</span>
+            <select id="limit" class="select">
+              <option value="6">6</option>
+              <option value="8">8</option>
+              <option value="12" selected>12</option>
+              <option value="16">16</option>
+              <option value="20">20</option>
+              <option value="30">30</option>
+            </select>
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-[11px] uppercase tracking-wide text-muted">Min samples (tested)</span>
+            <input id="minTested" class="input" type="number" min="0" step="1" value="0" />
+          </label>
+          <label class="flex items-center gap-2 pt-7 text-[#cbd3e7] select-none cursor-pointer text-[13px] transition-colors hover:text-text-primary">
+            <input id="excludeUnknown" type="checkbox" class="w-[18px] h-[18px] accent-accent cursor-pointer" />
+            <span>Exclude “Unknown”</span>
+          </label>
+        </div>
+
+        <div class="mt-4 overflow-auto rounded-xl border border-border bg-black/15">
+          <table class="min-w-[980px] w-full text-sm" id="compatTable">
+            <thead id="compatThead" class="sticky top-0 bg-black/40 backdrop-blur border-b border-border"></thead>
+            <tbody id="compatTbody" class="[&_tr:last-child]:border-0"></tbody>
+          </table>
+        </div>
+        <div class="mt-3 text-[12px] text-muted">
+          <span class="font-semibold text-[#cbd3e7]">Note:</span> “-” means the family was not tested/reported for that bucket (e.g. WebGL-only families on WebGPU-tested devices).
+        </div>
+      </section>
+
+      <!-- Raw -->
+      <section class="card">
+        <details>
+          <summary>Raw response</summary>
+          <pre id="rawJson" class="mt-3 text-xs text-muted whitespace-pre-wrap break-words"></pre>
+        </details>
+      </section>
+    </main>
+
+    <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-2 max-w-sm"></div>
+    <script src="/compat.js"></script>
+  </body>
+</html>
+
