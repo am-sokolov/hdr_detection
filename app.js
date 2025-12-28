@@ -26,6 +26,8 @@ const dom = {
   supportedOnly: document.getElementById("supportedOnly"),
   hdrOnly: document.getElementById("hdrOnly"),
   compressedOnly: document.getElementById("compressedOnly"),
+  textureFormatsTitle: document.getElementById("textureFormatsTitle"),
+  textureFormatsDescription: document.getElementById("textureFormatsDescription"),
   webgpuTbody: document.getElementById("webgpuTbody"),
   formatCount: document.getElementById("formatCount"),
   webgpuFeatures: document.getElementById("webgpuFeatures"),
@@ -42,6 +44,14 @@ const dom = {
 let lastReport = null;
 /** @type {Array<any>} */
 let lastWebgpuFormats = [];
+/** @type {any} */
+let lastWebgpu = null;
+/** @type {boolean} */
+let hasRun = false;
+/** @type {"webgpu" | "webgl"} */
+let lastTextureSource = "webgpu";
+const DEFAULT_TEXTURE_FORMATS_TITLE = dom.textureFormatsTitle?.textContent || "Texture Formats";
+const DEFAULT_TEXTURE_FORMATS_DESCRIPTION = dom.textureFormatsDescription?.textContent || "";
 /** @type {string} */
 let currentSortKey = "";
 /** @type {string} */
@@ -240,6 +250,11 @@ const WEBGL_COMPRESSED_ENUMS = new Map([
   [0x8c4d, "COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT"],
   [0x8c4e, "COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT"],
   [0x8c4f, "COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT"],
+  // PVRTC (common on iOS / WebKit)
+  [0x8c00, "COMPRESSED_RGB_PVRTC_4BPPV1_IMG"],
+  [0x8c01, "COMPRESSED_RGB_PVRTC_2BPPV1_IMG"],
+  [0x8c02, "COMPRESSED_RGBA_PVRTC_4BPPV1_IMG"],
+  [0x8c03, "COMPRESSED_RGBA_PVRTC_2BPPV1_IMG"],
   // ETC1
   [0x8d64, "COMPRESSED_RGB_ETC1_WEBGL"],
   // ETC2/EAC (common subset)
@@ -1094,6 +1109,13 @@ function valueOrDash(v) {
   return String(v);
 }
 
+function hasAnyExtension(extMap, names) {
+  for (const name of names) {
+    if (extMap && extMap[name]) return true;
+  }
+  return false;
+}
+
 function renderStructuredWebglInfo(info, targetEl) {
   if (!targetEl) return;
   if (!info || !info.available) {
@@ -1117,8 +1139,37 @@ function renderStructuredWebglInfo(info, targetEl) {
   const compressionCount = Array.isArray(info.compressedFormats) ? info.compressedFormats.length : 0;
   const aniso = info.anisotropy?.supported ? `Yes (max ${valueOrDash(info.anisotropy.max)})` : "No";
   const extListText = supportedExtNames.join("\n");
+  const compressedListText =
+    Array.isArray(info.compressedFormats) && info.compressedFormats.length
+      ? info.compressedFormats.join("\n")
+      : "No compressed texture formats reported.";
 
-  const astcSupported = Boolean(info.astc) || Boolean(ext.WEBGL_compressed_texture_astc);
+  const hasS3TC = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_s3tc",
+    "WEBKIT_WEBGL_compressed_texture_s3tc",
+    "MOZ_WEBGL_compressed_texture_s3tc",
+  ]);
+  const hasS3TCSRGB = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_s3tc_srgb",
+    "WEBKIT_WEBGL_compressed_texture_s3tc_srgb",
+  ]);
+  const hasETC1 = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_etc1",
+    "WEBKIT_WEBGL_compressed_texture_etc1",
+  ]);
+  const hasETC2 = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_etc",
+    "WEBKIT_WEBGL_compressed_texture_etc",
+  ]);
+  const hasPVRTC = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_pvrtc",
+    "WEBKIT_WEBGL_compressed_texture_pvrtc",
+  ]);
+
+  const astcSupported = Boolean(info.astc) || hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_astc",
+    "WEBKIT_WEBGL_compressed_texture_astc",
+  ]);
   const astcProfiles = Array.isArray(info.astc?.profiles) ? info.astc.profiles : null;
   const astcProfilesText = astcSupported ? (astcProfiles ? astcProfiles.join(", ") : "n/a") : "-";
   const astcHdrProfileText = astcSupported ? (astcProfiles ? yesNo(astcProfiles.includes("hdr")) : "n/a") : "-";
@@ -1172,18 +1223,25 @@ function renderStructuredWebglInfo(info, targetEl) {
       icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>`,
       rows: [
         ["Anisotropy", aniso],
-        ["S3TC/DXT", yesNo(ext.WEBGL_compressed_texture_s3tc)],
-        ["S3TC sRGB", yesNo(ext.WEBGL_compressed_texture_s3tc_srgb)],
-        ["ETC1", yesNo(ext.WEBGL_compressed_texture_etc1)],
-        ["ETC2/EAC", yesNo(ext.WEBGL_compressed_texture_etc)],
+        ["S3TC/DXT", yesNo(hasS3TC)],
+        ["S3TC sRGB", yesNo(hasS3TCSRGB)],
+        ["ETC1", yesNo(hasETC1)],
+        ["ETC2/EAC", yesNo(hasETC2)],
         ["ASTC", yesNo(astcSupported)],
         ["ASTC profiles", astcProfilesText],
         ["ASTC HDR profile", astcHdrProfileText],
+        ["PVRTC", yesNo(hasPVRTC)],
         ["BPTC", yesNo(ext.EXT_texture_compression_bptc)],
         ["RGTC", yesNo(ext.EXT_texture_compression_rgtc)],
         ["Reported compressed formats", String(compressionCount)],
         ["Supported extensions", String(trueExtCount)],
       ],
+      extraHtml: `
+        <details class="details">
+          <summary>Show compressed texture formats</summary>
+          <pre class="pre muted">${escapeHtml(compressedListText)}</pre>
+        </details>
+      `,
     },
     {
       title: "Extensions",
@@ -1227,6 +1285,8 @@ function formatKind(format) {
   if (format.startsWith("bc")) return "compressed-bc";
   if (format.startsWith("etc2") || format.startsWith("eac")) return "compressed-etc2/eac";
   if (format.startsWith("astc")) return "compressed-astc";
+  if (format.startsWith("etc1")) return "compressed-etc1";
+  if (format.startsWith("pvrtc")) return "compressed-pvrtc";
   if (format.startsWith("depth") || format.startsWith("stencil")) return "depth/stencil";
   if (format.includes("-srgb")) return "srgb";
   if (format.includes("snorm")) return "snorm";
@@ -1238,7 +1298,14 @@ function formatKind(format) {
 }
 
 function formatIsCompressed(format) {
-  return format.startsWith("bc") || format.startsWith("etc2") || format.startsWith("eac") || format.startsWith("astc");
+  return (
+    format.startsWith("bc") ||
+    format.startsWith("etc2") ||
+    format.startsWith("eac") ||
+    format.startsWith("astc") ||
+    format.startsWith("pvrtc") ||
+    format.startsWith("etc1")
+  );
 }
 
 function formatIsHdr(format) {
@@ -1246,6 +1313,200 @@ function formatIsHdr(format) {
   if (format === "rg11b10ufloat" || format === "rgb9e5ufloat") return true;
   if (format === "rgb10a2unorm") return true;
   return false;
+}
+
+function mapWebglCompressedFormatToUnifiedFormats(name) {
+  switch (String(name || "")) {
+    // S3TC / DXT
+    case "COMPRESSED_RGB_S3TC_DXT1_EXT":
+    case "COMPRESSED_RGBA_S3TC_DXT1_EXT":
+      return ["bc1-rgba-unorm"];
+    case "COMPRESSED_RGBA_S3TC_DXT3_EXT":
+      return ["bc2-rgba-unorm"];
+    case "COMPRESSED_RGBA_S3TC_DXT5_EXT":
+      return ["bc3-rgba-unorm"];
+    // S3TC sRGB
+    case "COMPRESSED_SRGB_S3TC_DXT1_EXT":
+    case "COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT":
+      return ["bc1-rgba-unorm-srgb"];
+    case "COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT":
+      return ["bc2-rgba-unorm-srgb"];
+    case "COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT":
+      return ["bc3-rgba-unorm-srgb"];
+    // ETC1 (WebGL-only, but useful on older devices)
+    case "COMPRESSED_RGB_ETC1_WEBGL":
+      return ["etc1-rgb8unorm"];
+    // ETC2/EAC
+    case "COMPRESSED_RGB8_ETC2":
+      return ["etc2-rgb8unorm"];
+    case "COMPRESSED_SRGB8_ETC2":
+      return ["etc2-rgb8unorm-srgb"];
+    case "COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2":
+      return ["etc2-rgb8a1unorm"];
+    case "COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2":
+      return ["etc2-rgb8a1unorm-srgb"];
+    case "COMPRESSED_RGBA8_ETC2_EAC":
+      return ["etc2-rgba8unorm"];
+    case "COMPRESSED_SRGB8_ALPHA8_ETC2_EAC":
+      return ["etc2-rgba8unorm-srgb"];
+    case "COMPRESSED_R11_EAC":
+      return ["eac-r11unorm"];
+    case "COMPRESSED_SIGNED_R11_EAC":
+      return ["eac-r11snorm"];
+    case "COMPRESSED_RG11_EAC":
+      return ["eac-rg11unorm"];
+    case "COMPRESSED_SIGNED_RG11_EAC":
+      return ["eac-rg11snorm"];
+    // BPTC / RGTC
+    case "COMPRESSED_RGBA_BPTC_UNORM_EXT":
+      return ["bc7-rgba-unorm"];
+    case "COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT":
+      return ["bc7-rgba-unorm-srgb"];
+    case "COMPRESSED_RGB_BPTC_SIGNED_FLOAT_EXT":
+      return ["bc6h-rgb-float"];
+    case "COMPRESSED_RGB_BPTC_UNSIGNED_FLOAT_EXT":
+      return ["bc6h-rgb-ufloat"];
+    case "COMPRESSED_RED_RGTC1_EXT":
+      return ["bc4-r-unorm"];
+    case "COMPRESSED_SIGNED_RED_RGTC1_EXT":
+      return ["bc4-r-snorm"];
+    case "COMPRESSED_RED_GREEN_RGTC2_EXT":
+      return ["bc5-rg-unorm"];
+    case "COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT":
+      return ["bc5-rg-snorm"];
+    // PVRTC (common on iOS / WebKit; not in WebGPU)
+    case "COMPRESSED_RGB_PVRTC_4BPPV1_IMG":
+      return ["pvrtc-rgb-4bpp-unorm"];
+    case "COMPRESSED_RGB_PVRTC_2BPPV1_IMG":
+      return ["pvrtc-rgb-2bpp-unorm"];
+    case "COMPRESSED_RGBA_PVRTC_4BPPV1_IMG":
+      return ["pvrtc-rgba-4bpp-unorm"];
+    case "COMPRESSED_RGBA_PVRTC_2BPPV1_IMG":
+      return ["pvrtc-rgba-2bpp-unorm"];
+  }
+
+  const astcRGBA = /^COMPRESSED_RGBA_ASTC_(\\d+x\\d+)_KHR$/.exec(String(name || ""));
+  if (astcRGBA) return [`astc-${astcRGBA[1]}-unorm`];
+
+  const astcSRGB = /^COMPRESSED_SRGB8_ALPHA8_ASTC_(\\d+x\\d+)_KHR$/.exec(String(name || ""));
+  if (astcSRGB) return [`astc-${astcSRGB[1]}-unorm-srgb`];
+
+  return [];
+}
+
+function buildWebglFallbackFormatList(webgl2, webgl1) {
+  const webglNames = new Set();
+  for (const item of (webgl2?.compressedFormats || [])) webglNames.add(String(item));
+  for (const item of (webgl1?.compressedFormats || [])) webglNames.add(String(item));
+
+  const supported = new Set();
+  for (const name of webglNames) {
+    for (const fmt of mapWebglCompressedFormatToUnifiedFormats(name)) {
+      if (fmt) supported.add(fmt);
+    }
+  }
+
+  const ext = Object.assign({}, webgl2?.extensions || {}, webgl1?.extensions || {});
+  const hasS3TC = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_s3tc",
+    "WEBKIT_WEBGL_compressed_texture_s3tc",
+    "MOZ_WEBGL_compressed_texture_s3tc",
+  ]);
+  const hasS3TCSRGB = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_s3tc_srgb",
+    "WEBKIT_WEBGL_compressed_texture_s3tc_srgb",
+  ]);
+  const hasETC1 = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_etc1",
+    "WEBKIT_WEBGL_compressed_texture_etc1",
+  ]);
+  const hasETC2 = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_etc",
+    "WEBKIT_WEBGL_compressed_texture_etc",
+  ]);
+  const hasASTC = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_astc",
+    "WEBKIT_WEBGL_compressed_texture_astc",
+  ]);
+  const hasPVRTC = hasAnyExtension(ext, [
+    "WEBGL_compressed_texture_pvrtc",
+    "WEBKIT_WEBGL_compressed_texture_pvrtc",
+  ]);
+  const hasBPTC = hasAnyExtension(ext, ["EXT_texture_compression_bptc"]);
+  const hasRGTC = hasAnyExtension(ext, ["EXT_texture_compression_rgtc"]);
+
+  const candidates = [];
+  for (const fmt of WEBGPU_TEXTURE_FORMATS) {
+    if (formatIsCompressed(fmt)) candidates.push(fmt);
+  }
+  // Include WebGL-only compressed formats so iOS/legacy devices still report texture support.
+  candidates.push(
+    "etc1-rgb8unorm",
+    "pvrtc-rgb-2bpp-unorm",
+    "pvrtc-rgb-4bpp-unorm",
+    "pvrtc-rgba-2bpp-unorm",
+    "pvrtc-rgba-4bpp-unorm"
+  );
+
+  // Some browsers only expose compressed enums after enabling extensions; fall back to extension flags.
+  if (hasS3TC) {
+    supported.add("bc1-rgba-unorm");
+    supported.add("bc2-rgba-unorm");
+    supported.add("bc3-rgba-unorm");
+  }
+  if (hasS3TCSRGB) {
+    supported.add("bc1-rgba-unorm-srgb");
+    supported.add("bc2-rgba-unorm-srgb");
+    supported.add("bc3-rgba-unorm-srgb");
+  }
+  if (hasBPTC) {
+    supported.add("bc6h-rgb-ufloat");
+    supported.add("bc6h-rgb-float");
+    supported.add("bc7-rgba-unorm");
+    supported.add("bc7-rgba-unorm-srgb");
+  }
+  if (hasRGTC) {
+    supported.add("bc4-r-unorm");
+    supported.add("bc4-r-snorm");
+    supported.add("bc5-rg-unorm");
+    supported.add("bc5-rg-snorm");
+  }
+  if (hasETC2) {
+    for (const fmt of candidates) {
+      if (fmt.startsWith("etc2") || fmt.startsWith("eac")) supported.add(fmt);
+    }
+  }
+  if (hasASTC) {
+    for (const fmt of candidates) {
+      if (fmt.startsWith("astc-")) supported.add(fmt);
+    }
+  }
+  if (hasETC1) supported.add("etc1-rgb8unorm");
+  if (hasPVRTC) {
+    supported.add("pvrtc-rgb-2bpp-unorm");
+    supported.add("pvrtc-rgb-4bpp-unorm");
+    supported.add("pvrtc-rgba-2bpp-unorm");
+    supported.add("pvrtc-rgba-4bpp-unorm");
+  }
+
+  // Dedupe, stable order.
+  const seen = new Set();
+  const out = [];
+  for (const fmt of candidates) {
+    if (seen.has(fmt)) continue;
+    seen.add(fmt);
+    out.push({
+      format: fmt,
+      kind: formatKind(fmt),
+      hdr: formatIsHdr(fmt),
+      compressed: formatIsCompressed(fmt),
+      sampled: supported.has(fmt),
+      filterable: null,
+      renderable: false,
+      storage: false,
+    });
+  }
+  return out;
 }
 
 function compressedBlockSize(format) {
@@ -1399,11 +1660,21 @@ async function detectWebgpu(onProgress) {
   try {
     adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
     if (!adapter) {
-      webgpu.errors.push("navigator.gpu.requestAdapter() returned null.");
-      return webgpu;
+      webgpu.warnings.push("requestAdapter(high-performance) returned null, retrying default.");
+      adapter = await navigator.gpu.requestAdapter();
     }
   } catch (err) {
-    webgpu.errors.push(`requestAdapter() failed: ${String(err)}`);
+    webgpu.warnings.push(`requestAdapter(high-performance) failed, retrying default: ${String(err)}`);
+    try {
+      adapter = await navigator.gpu.requestAdapter();
+    } catch (err2) {
+      webgpu.errors.push(`requestAdapter() failed: ${String(err2)}`);
+      return webgpu;
+    }
+  }
+
+  if (!adapter) {
+    webgpu.errors.push("navigator.gpu.requestAdapter() returned null.");
     return webgpu;
   }
 
@@ -1552,19 +1823,43 @@ function gatherWebglInfo(gl) {
     if (name && typeof name === "string") extensions[name] = true;
   }
 
+  const getAnyExt = (...names) => {
+    for (const name of names) {
+      try {
+        const ext = gl.getExtension(name);
+        if (ext) {
+          extensions[name] = true;
+          return ext;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  };
+
   // More robust anisotropy detection across vendor-prefixed names.
   const anisotropyExt =
-    gl.getExtension("EXT_texture_filter_anisotropic") ||
-    gl.getExtension("MOZ_EXT_texture_filter_anisotropic") ||
-    gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic");
+    getAnyExt("EXT_texture_filter_anisotropic", "MOZ_EXT_texture_filter_anisotropic", "WEBKIT_EXT_texture_filter_anisotropic");
   if (anisotropyExt) {
     extensions.EXT_texture_filter_anisotropic = true;
   }
 
+  // Enable compressed texture extensions (some browsers only surface enums after getExtension()).
+  // WebKit/iOS often uses WEBKIT_ prefixed names for PVRTC (and sometimes others).
+  getAnyExt("WEBGL_compressed_texture_s3tc", "WEBKIT_WEBGL_compressed_texture_s3tc", "MOZ_WEBGL_compressed_texture_s3tc");
+  getAnyExt("WEBGL_compressed_texture_s3tc_srgb", "WEBKIT_WEBGL_compressed_texture_s3tc_srgb");
+  getAnyExt("WEBGL_compressed_texture_etc1", "WEBKIT_WEBGL_compressed_texture_etc1");
+  getAnyExt("WEBGL_compressed_texture_etc", "WEBKIT_WEBGL_compressed_texture_etc");
+  getAnyExt("WEBGL_compressed_texture_astc", "WEBKIT_WEBGL_compressed_texture_astc");
+  getAnyExt("WEBGL_compressed_texture_pvrtc", "WEBKIT_WEBGL_compressed_texture_pvrtc");
+  getAnyExt("EXT_texture_compression_bptc");
+  getAnyExt("EXT_texture_compression_rgtc");
+
   // ASTC profile support (LDR vs HDR) if exposed by the extension.
   let astc = null;
   try {
-    const astcExt = gl.getExtension("WEBGL_compressed_texture_astc");
+    const astcExt = getAnyExt("WEBGL_compressed_texture_astc", "WEBKIT_WEBGL_compressed_texture_astc");
     if (astcExt) {
       let profiles = null;
       if (typeof astcExt.getSupportedProfiles === "function") {
@@ -1597,8 +1892,8 @@ function gatherWebglInfo(gl) {
   }
 
   let debugInfo = null;
-  if (extensions.WEBGL_debug_renderer_info) {
-    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+  if (extensions.WEBGL_debug_renderer_info || extensions.WEBKIT_WEBGL_debug_renderer_info) {
+    const dbg = getAnyExt("WEBGL_debug_renderer_info", "WEBKIT_WEBGL_debug_renderer_info");
     if (dbg) {
       debugInfo = {
         UNMASKED_VENDOR_WEBGL: gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL),
@@ -1712,6 +2007,12 @@ function formatSupportBadge(value) {
   return `<span class="${base} border-bad/40 text-bad bg-bad/15">no</span>`;
 }
 
+function formatRangeBadge(hdr) {
+  const base = "inline-flex items-center justify-center rounded-full px-2.5 py-0.5 border text-xs font-medium tabular-nums transition-all";
+  if (hdr === true) return `<span class="${base} border-warn/45 text-warn bg-warn/15" title="HDR-capable format (supports values beyond 0–1)">HDR</span>`;
+  return `<span class="${base} border-border/50 text-muted bg-black/10" title="SDR-range format (0–1)">SDR</span>`;
+}
+
 function sortFormats(formats, key, dir) {
   const sorted = [...formats];
   sorted.sort((a, b) => {
@@ -1734,13 +2035,96 @@ function sortFormats(formats, key, dir) {
   return sorted;
 }
 
-function renderWebgpuTable(formats, filter) {
+function buildWebglCompressedTableFormats(webgl2, webgl1) {
+  const astcHdrProfileSupported = Boolean(webgl2?.astc?.hdrProfile) || Boolean(webgl1?.astc?.hdrProfile);
+
+  const map = new Map();
+  const add = (src, name) => {
+    const key = String(name || "").trim();
+    if (!key) return;
+
+    let entry = map.get(key);
+    if (!entry) {
+      entry = {
+        format: key,
+        kind: "",
+        hdr: false,
+        compressed: true,
+        sampled: true,
+        filterable: null,
+        renderable: null,
+        storage: null,
+        _src: new Set(),
+      };
+      map.set(key, entry);
+    }
+    entry._src.add(src);
+  };
+
+  for (const name of (webgl2?.compressedFormats || [])) add("webgl2", name);
+  for (const name of (webgl1?.compressedFormats || [])) add("webgl1", name);
+
+  const out = [];
+  for (const entry of map.values()) {
+    const src = entry._src;
+    const srcLabel = src.size > 1 ? "webgl1+2" : src.has("webgl2") ? "webgl2" : "webgl1";
+    entry.kind = `${srcLabel} compressed`;
+
+    // ASTC can support HDR depending on device profile; only mark the non-sRGB ASTC enums.
+    const isAstc = entry.format.includes("ASTC") && !entry.format.includes("SRGB");
+    entry.hdr = astcHdrProfileSupported && isAstc;
+
+    delete entry._src;
+    out.push(entry);
+  }
+
+  out.sort((a, b) => a.format.localeCompare(b.format));
+  return out;
+}
+
+function selectTextureFormatsForTable(webgpu, webgl2, webgl1) {
+  const webgpuFormats = Array.isArray(webgpu?.formats) ? webgpu.formats : [];
+  if (webgpuFormats.length > 0) {
+    return { source: "webgpu", formats: webgpuFormats };
+  }
+
+  const webglFormats = buildWebglCompressedTableFormats(webgl2, webgl1);
+  if (webglFormats.length > 0) {
+    return { source: "webgl", formats: webglFormats };
+  }
+
+  return { source: webgpu?.available ? "webgpu" : "webgl", formats: [] };
+}
+
+function setTextureFormatsHeader(source, meta) {
+  if (!dom.textureFormatsTitle || !dom.textureFormatsDescription) return;
+
+  if (source === "webgpu") {
+    dom.textureFormatsTitle.textContent = DEFAULT_TEXTURE_FORMATS_TITLE;
+    dom.textureFormatsDescription.textContent = DEFAULT_TEXTURE_FORMATS_DESCRIPTION;
+    return;
+  }
+
+  const reason = Array.isArray(meta?.errors) && meta.errors.length ? String(meta.errors[0]) : "";
+  dom.textureFormatsTitle.textContent = DEFAULT_TEXTURE_FORMATS_TITLE;
+  dom.textureFormatsDescription.textContent = reason
+    ? `WebGPU couldn't be used (${reason}). Showing texture format support derived from WebGL capabilities.`
+    : "Showing texture format support derived from WebGL capabilities.";
+}
+
+function renderWebgpuTable(formats, filter, meta = null) {
+  const source = meta?.source === "webgl" ? "webgl" : "webgpu";
   const { search, supportedOnly, hdrOnly, compressedOnly } = filter;
   const searchNorm = (search || "").trim().toLowerCase();
 
-  let filtered = formats.filter(f => {
+  let filtered = formats
+    .map((f) => ({
+      ...f,
+      any: Boolean(f?.sampled || f?.filterable || f?.renderable || f?.storage),
+    }))
+    .filter(f => {
     if (searchNorm && !f.format.toLowerCase().includes(searchNorm)) return false;
-    if (supportedOnly && !(f.sampled || f.renderable || f.storage)) return false;
+    if (supportedOnly && !f.any) return false;
     if (hdrOnly && !f.hdr) return false;
     if (compressedOnly && !f.compressed) return false;
     return true;
@@ -1760,20 +2144,43 @@ function renderWebgpuTable(formats, filter) {
   });
 
   // Update format count
-  const supportedCount = filtered.filter(f => f.sampled || f.renderable || f.storage).length;
+  const supportedCount = filtered.filter(f => f.any).length;
   dom.formatCount.innerHTML = `Showing <strong>${filtered.length}</strong> formats (${supportedCount} supported)`;
 
   if (filtered.length === 0) {
+    let title = "No Matching Formats";
+    let message = "Try adjusting your search or filter criteria.";
+
+    if (!hasRun && formats.length === 0) {
+      title = "Run Detection";
+      message = source === "webgl"
+        ? "Click “Run detection” to collect WebGL texture capabilities on this device."
+        : "Click “Run detection” to test WebGPU texture formats on this device.";
+    } else if (source === "webgpu") {
+      if (meta && meta.available === false) {
+        title = "WebGPU Not Available";
+        message = "This browser does not expose WebGPU (common on Safari/iOS). Showing WebGL fallback where possible.";
+      } else if (meta && Array.isArray(meta.errors) && meta.errors.length) {
+        title = "WebGPU Detection Failed";
+        message = String(meta.errors[0]);
+      }
+    } else {
+      if (formats.length === 0) {
+        title = "No WebGL Formats Detected";
+        message = "WebGL did not report any compressed texture formats (extensions may be blocked or unavailable).";
+      }
+    }
+
     dom.webgpuTbody.innerHTML = `
       <tr>
-        <td colspan="7" class="p-0">
+        <td colspan="8" class="p-0">
           <div class="text-center py-12 px-6 text-muted">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-12 h-12 mx-auto mb-4 opacity-50">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
-            <div class="text-base font-semibold text-text-primary mb-2">No Matching Formats</div>
-            <div class="text-sm max-w-xs mx-auto">Try adjusting your search or filter criteria.</div>
+            <div class="text-base font-semibold text-text-primary mb-2">${escapeHtml(title)}</div>
+            <div class="text-sm max-w-xs mx-auto">${escapeHtml(message)}</div>
           </div>
         </td>
       </tr>
@@ -1782,12 +2189,13 @@ function renderWebgpuTable(formats, filter) {
   }
 
   const rows = filtered.map(f => {
-    const isSupported = f.sampled || f.renderable || f.storage;
+    const isSupported = Boolean(f.any);
     const rowClass = isSupported ? "bg-good/5" : "";
     return `<tr class="border-b border-border/50 transition-colors hover:bg-white/[0.02] ${rowClass}">
       <td class="p-3"><code class="font-mono text-[0.9em] text-[#d7deff] bg-accent/10 px-1.5 py-0.5 rounded">${escapeHtml(f.format)}</code></td>
       <td class="p-3 text-muted">${escapeHtml(f.kind)}</td>
-      <td class="p-3">${formatSupportBadge(f.hdr)}</td>
+      <td class="p-3">${formatSupportBadge(f.any)}</td>
+      <td class="p-3">${formatRangeBadge(f.hdr)}</td>
       <td class="p-3">${formatSupportBadge(f.sampled)}</td>
       <td class="p-3">${formatSupportBadge(f.filterable)}</td>
       <td class="p-3">${formatSupportBadge(f.renderable)}</td>
@@ -1804,7 +2212,7 @@ function updateFilters() {
     supportedOnly: dom.supportedOnly.checked,
     hdrOnly: dom.hdrOnly.checked,
     compressedOnly: dom.compressedOnly.checked,
-  });
+  }, lastWebgpu ? { ...lastWebgpu, source: lastTextureSource } : { source: lastTextureSource });
 }
 
 // ===== Column Sorting =====
@@ -1868,6 +2276,15 @@ async function run() {
 
   setProgress(95, "Finalizing results...");
 
+  // If WebGPU is unavailable/blocked, still report texture format support via WebGL (compressed formats).
+  if (!Array.isArray(webgpu.formats) || webgpu.formats.length === 0) {
+    const fallback = buildWebglFallbackFormatList(webgl2, webgl1);
+    if (fallback.length > 0) {
+      webgpu.formats = fallback;
+      webgpu.warnings.push("WebGPU format testing unavailable; reporting compressed texture formats derived from WebGL.");
+    }
+  }
+
   // Improve "HDR" format classification with ASTC HDR profile support (when exposed by WebGL).
   const astcHdrProfileSupported = Boolean(webgl2?.astc?.hdrProfile) || Boolean(webgl1?.astc?.hdrProfile);
   if (astcHdrProfileSupported && Array.isArray(webgpu.formats)) {
@@ -1915,15 +2332,24 @@ async function run() {
   setStatusChip(dom.webgl2Status, webgl2.available ? "good" : "bad", webgl2.available ? "Available" : "Not Available");
   setStatusItemState(dom.webgl2Item, webgl2.available ? "good" : "bad");
 
-  lastWebgpuFormats = webgpu.formats || [];
+  hasRun = true;
+  lastWebgpu = webgpu;
+
+  const selected = selectTextureFormatsForTable(webgpu, webgl2, webgl1);
+  lastTextureSource = selected.source;
+  lastWebgpuFormats = selected.formats;
+
+  setTextureFormatsHeader(lastTextureSource, webgpu);
   renderWebgpuTable(lastWebgpuFormats, {
     search: dom.searchInput.value,
     supportedOnly: dom.supportedOnly.checked,
     hdrOnly: dom.hdrOnly.checked,
     compressedOnly: dom.compressedOnly.checked,
-  });
+  }, { ...webgpu, source: lastTextureSource });
 
   dom.webgpuFeatures.textContent = stringifySafe({
+    available: webgpu.available,
+    secureContext: webgpu.secureContext,
     preferredCanvasFormat: webgpu.preferredCanvasFormat,
     adapterFeatures: webgpu.adapterFeatures,
     deviceFeatures: webgpu.deviceFeatures,
@@ -1974,22 +2400,48 @@ async function run() {
   hideProgress();
   dom.runBtn.classList.remove("opacity-70", "pointer-events-none");
 
-  const supportedFormats = lastWebgpuFormats.filter(f => f.sampled || f.renderable || f.storage).length;
+  const webglCompressed = new Set();
+  for (const item of (webgl2?.compressedFormats || [])) webglCompressed.add(String(item));
+  for (const item of (webgl1?.compressedFormats || [])) webglCompressed.add(String(item));
+  const webglCompressedCount = webglCompressed.size;
+
+  const tableSupported = lastWebgpuFormats.filter(f => f.sampled || f.renderable || f.storage).length;
+  const tableTotal = lastWebgpuFormats.length;
+
+  const webgpuTested = Array.isArray(webgpu?.formats) ? webgpu.formats.length : 0;
+  const webgpuSupported = Array.isArray(webgpu?.formats) ? webgpu.formats.filter(f => f.sampled || f.renderable || f.storage).length : 0;
+
+  const webglSummary = `WebGL compressed formats: ${webglCompressedCount}`;
+  const webgpuBlocked = Array.isArray(webgpu?.errors) && webgpu.errors.length > 0;
+
+  const tableSummary = lastTextureSource === "webgpu"
+    ? webgpuTested > 0
+      ? `${webgpuSupported}/${webgpuTested} WebGPU formats supported`
+      : webgpuBlocked
+        ? "WebGPU blocked/disabled"
+        : webgpu.available
+          ? "WebGPU available but not testable"
+          : "WebGPU not available"
+    : `${tableSupported}/${tableTotal} formats supported (WebGL)`;
+
+  const toastMsg = lastTextureSource === "webgpu"
+    ? webgpuTested > 0 ? `Found ${webgpuSupported} supported WebGPU formats` : webglSummary
+    : `Found ${tableTotal} WebGL compressed formats`;
 
   if (submit.ok) {
     const serverStatus = submit.payload?.status ? String(submit.payload.status) : "ok";
-    dom.runStatus.textContent = `Detection complete. ${supportedFormats}/${lastWebgpuFormats.length} formats supported. Uploaded: ${serverStatus}`;
+    dom.runStatus.textContent = `Detection complete. ${tableSummary}. ${webglSummary}${webgpuBlocked && lastTextureSource !== "webgpu" ? " (WebGPU blocked)" : ""}. Uploaded: ${serverStatus}`;
     dom.runStatus.className = "flex items-center gap-2 text-[13px] text-good";
-    showToast("success", "Detection Complete", `Found ${supportedFormats} supported WebGPU formats`);
+    showToast("success", "Detection Complete", toastMsg);
   } else {
     if (submit.status === 404) {
-      dom.runStatus.textContent = `Detection complete. ${supportedFormats}/${lastWebgpuFormats.length} formats supported. (No backend)`;
+      dom.runStatus.textContent = `Detection complete. ${tableSummary}. ${webglSummary}${webgpuBlocked && lastTextureSource !== "webgpu" ? " (WebGPU blocked)" : ""}. (No backend)`;
     } else {
       const status = submit.status != null ? `HTTP ${submit.status}` : "network error";
-      dom.runStatus.textContent = `Detection complete. ${supportedFormats}/${lastWebgpuFormats.length} formats supported. Upload failed (${status})`;
+      dom.runStatus.textContent = `Detection complete. ${tableSummary}. ${webglSummary}${webgpuBlocked && lastTextureSource !== "webgpu" ? " (WebGPU blocked)" : ""}. Upload failed (${status})`;
     }
     dom.runStatus.className = "flex items-center gap-2 text-[13px] text-good";
-    showToast("success", "Detection Complete", `Found ${supportedFormats} supported WebGPU formats`);
+    showToast("success", "Detection Complete", toastMsg);
   }
 
   dom.runBtn.disabled = false;
@@ -2058,6 +2510,17 @@ setStatusItemState(dom.secureContextItem, isSecure ? "good" : "bad");
 const hasWebGPU = typeof navigator.gpu !== "undefined";
 setStatusChip(dom.webgpuStatus, hasWebGPU ? "warn" : "bad", hasWebGPU ? "Detected" : "Not Available");
 setStatusItemState(dom.webgpuItem, hasWebGPU ? "warn" : "bad");
+
+// Render an initial placeholder for the WebGPU format table (useful on browsers without WebGPU, e.g. iOS WebKit).
+lastWebgpu = { available: hasWebGPU, secureContext: isSecure, errors: [] };
+lastTextureSource = hasWebGPU ? "webgpu" : "webgl";
+setTextureFormatsHeader(lastTextureSource, lastWebgpu);
+renderWebgpuTable(lastWebgpuFormats, {
+  search: dom.searchInput.value,
+  supportedOnly: dom.supportedOnly.checked,
+  hdrOnly: dom.hdrOnly.checked,
+  compressedOnly: dom.compressedOnly.checked,
+}, { ...lastWebgpu, source: lastTextureSource });
 
 const initialWebgl2 = tryCreateWebglContext("webgl2");
 setStatusChip(dom.webgl2Status, initialWebgl2 ? "warn" : "bad", initialWebgl2 ? "Detected" : "Not Available");

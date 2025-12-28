@@ -353,26 +353,27 @@
               <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
               <line x1="12" y1="22.08" x2="12" y2="12"></line>
             </svg>
-            WebGPU Texture Formats
+            <span id="textureFormatsTitle">Texture Formats</span>
           </h2>
           <div id="formatCount" class="text-[13px] text-muted"></div>
         </div>
-        <p class="text-muted text-[13px] my-2 leading-relaxed">
-          Each format is actively validated on this device by attempting to create textures and bindings. Some formats require optional WebGPU features (e.g. compression families).
+        <p id="textureFormatsDescription" class="text-muted text-[13px] my-2 leading-relaxed">
+          When WebGPU is available, formats are actively validated by creating textures and bindings. Otherwise, compressed texture support is derived from WebGL capabilities.
         </p>
         <!-- Column explanations -->
         <div class="text-[12px] text-muted leading-relaxed mb-3 p-3 rounded-lg bg-black/20 border border-border">
           <span class="font-semibold text-[#cbd3e7]">Columns:</span>
           <span class="text-text-dim">Format</span> — texture format name;
           <span class="text-text-dim">Type</span> — color/depth/stencil/compressed;
-          <span class="text-text-dim">HDR</span> — supports values beyond 0–1 range;
+          <span class="text-text-dim">Supported</span> — any supported usage (sampled/renderable/storage);
+          <span class="text-text-dim">Range</span> — SDR/HDR (HDR formats support values beyond 0–1);
           <span class="text-text-dim">Sampled</span> — readable in shaders;
           <span class="text-text-dim">Filterable</span> — hardware filtering (bilinear/trilinear);
           <span class="text-text-dim">Renderable</span> — usable as render target;
           <span class="text-text-dim">Storage</span> — read/write in compute shaders.
         </div>
         <div class="overflow-auto border border-border rounded-xl bg-black/15">
-          <table class="w-full border-collapse min-w-[860px] text-[13px]" id="webgpuTable" aria-describedby="webgpuTableDesc">
+          <table class="w-full border-collapse min-w-[940px] text-[13px]" id="webgpuTable" aria-describedby="webgpuTableDesc">
             <caption id="webgpuTableDesc" class="sr-only">
               WebGPU texture formats with support flags.
             </caption>
@@ -380,7 +381,8 @@
               <tr>
                 <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="format">Format</th>
                 <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="type">Type</th>
-                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="hdr">HDR</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="any">Supported</th>
+                <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="hdr">Range</th>
                 <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="sampled">Sampled</th>
                 <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="filterable">Filterable</th>
                 <th scope="col" class="sticky top-0 z-10 bg-[rgba(10,12,18,0.98)] backdrop-blur-xl border-b border-border text-left p-3 text-[#cbd3e7] font-semibold text-xs uppercase tracking-wide whitespace-nowrap sortable" data-sort="renderable">Renderable</th>
@@ -389,7 +391,7 @@
             </thead>
             <tbody id="webgpuTbody">
               <tr>
-                <td colspan="7" class="p-0">
+                <td colspan="8" class="p-0">
                   <div class="text-center py-12 px-6 text-muted">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-12 h-12 mx-auto mb-4 opacity-50" aria-hidden="true">
                       <polygon points="5 3 19 12 5 21 5 3"></polygon>

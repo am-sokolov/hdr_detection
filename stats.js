@@ -579,7 +579,8 @@ function renderBaseline(stats) {
     if (hdrOnly && !f.hdr) continue;
     if (colorOnly && String(f.kind || "") !== "color") continue;
     const count = Number(f[supportField] || 0);
-    const share = pct(count, denom);
+    const denomForFormat = Number(f.tested || 0) || denom;
+    const share = pct(count, denomForFormat);
     if (share < threshold) continue;
     passed.push({ format: f.format, pct: share });
   }
@@ -635,11 +636,12 @@ function renderFormatExplorer(stats) {
   for (const f of formats) {
     if (!f || typeof f.format !== "string") continue;
     const name = f.format;
+    const denomForFormat = Number(f.tested || 0) || denom;
     if (search && !name.toLowerCase().includes(search)) continue;
     if (supportedOnly && Number(f.any || 0) <= 0) continue;
     if (compressedOnly && !f.compressed) continue;
     if (extendedOnly && !f.hdr) continue;
-    if (minSupport > 0 && pct(Number(f.any || 0), denom) < minSupport) continue;
+    if (minSupport > 0 && pct(Number(f.any || 0), denomForFormat) < minSupport) continue;
     filtered.push(f);
   }
 
@@ -670,11 +672,12 @@ function renderFormatExplorer(stats) {
 	  dom.formatTableBody.innerHTML = filtered
 	    .slice(0, 300)
 	    .map((f) => {
+	      const rowDenom = Number(f.tested || 0) || denom;
 	      const supported = Number(f.any || 0) > 0;
 	      const rowClass = supported ? "bg-good/5" : "";
 	      const kind = String(f.kind || "");
 	      const hdrCount = Number(f.hdrCount || 0);
-	      const hdrDenom = Number(f.tested || denom || 0);
+	      const hdrDenom = rowDenom;
 	      const hdrBadge =
 	        f.hdr
 	          ? hdrDenom > 0 && hdrCount > 0 && hdrCount < hdrDenom
@@ -692,11 +695,11 @@ function renderFormatExplorer(stats) {
 	            <code class="font-mono text-[0.9em] text-[#d7deff] bg-accent/10 px-1.5 py-0.5 rounded">${escapeHtml(f.format)}</code>
           </td>
           <td class="p-3 text-muted">${typeBadges.join(" ")}</td>
-          <td class="p-3">${formatSupportCell(f.any, denom)}</td>
-          <td class="p-3">${formatSupportCell(f.sampled, denom)}</td>
-          <td class="p-3">${formatSupportCell(f.filterable, denom)}</td>
-          <td class="p-3">${formatSupportCell(f.renderable, denom)}</td>
-          <td class="p-3">${formatSupportCell(f.storage, denom)}</td>
+          <td class="p-3">${formatSupportCell(f.any, rowDenom)}</td>
+          <td class="p-3">${formatSupportCell(f.sampled, rowDenom)}</td>
+          <td class="p-3">${formatSupportCell(f.filterable, rowDenom)}</td>
+          <td class="p-3">${formatSupportCell(f.renderable, rowDenom)}</td>
+          <td class="p-3">${formatSupportCell(f.storage, rowDenom)}</td>
         </tr>
       `;
     })

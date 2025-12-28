@@ -894,6 +894,25 @@ func (s *Store) Stats(now time.Time, filter StatsFilter) (StatsResponse, error) 
 }
 
 func computeStats(now time.Time, startedAt time.Time, totals Totals, reports []Report, filter StatsFilter) StatsResponse {
+	normalizeWebGLCompressedFormat := func(s string) string {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return ""
+		}
+		switch strings.ToLower(s) {
+		case "0x8c00":
+			return "COMPRESSED_RGB_PVRTC_4BPPV1_IMG"
+		case "0x8c01":
+			return "COMPRESSED_RGB_PVRTC_2BPPV1_IMG"
+		case "0x8c02":
+			return "COMPRESSED_RGBA_PVRTC_4BPPV1_IMG"
+		case "0x8c03":
+			return "COMPRESSED_RGBA_PVRTC_2BPPV1_IMG"
+		default:
+			return s
+		}
+	}
+
 	browserCounts := map[string]int{}
 	osCounts := map[string]int{}
 	countryCounts := map[string]int{}
@@ -973,12 +992,12 @@ func computeStats(now time.Time, startedAt time.Time, totals Totals, reports []R
 			}
 		}
 
-		// WebGPU formats
+		// WebGPU format list (may be derived from WebGL when WebGPU is blocked/unavailable).
 		if r.WebGPU.Available {
 			webgpuAvailable += 1
-			if len(r.WebGPU.Formats) > 0 {
-				webgpuTested += 1
-			}
+		}
+		if len(r.WebGPU.Formats) > 0 {
+			webgpuTested += 1
 			for _, f := range r.WebGPU.Formats {
 				stat := formatMap[f.Format]
 				if stat == nil {
@@ -1032,7 +1051,9 @@ func computeStats(now time.Time, startedAt time.Time, totals Totals, reports []R
 				}
 			}
 			for _, cf := range r.WebGL2.CompressedFormats {
-				webgl2CompressedCounts[cf] += 1
+				if name := normalizeWebGLCompressedFormat(cf); name != "" {
+					webgl2CompressedCounts[name] += 1
+				}
 			}
 
 			if r.WebGL2.Limits != nil {
@@ -1068,7 +1089,9 @@ func computeStats(now time.Time, startedAt time.Time, totals Totals, reports []R
 				}
 			}
 			for _, cf := range r.WebGL1.CompressedFormats {
-				webgl1CompressedCounts[cf] += 1
+				if name := normalizeWebGLCompressedFormat(cf); name != "" {
+					webgl1CompressedCounts[name] += 1
+				}
 			}
 			if r.WebGL1.Limits != nil {
 				webgl1Limits.add(r.WebGL1.Limits)
