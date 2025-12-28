@@ -759,6 +759,47 @@ type StatsFilter struct {
 	WebGL1Ext       []string `json:"webgl1Ext,omitempty"`
 }
 
+type CompatResponse struct {
+	GeneratedAt time.Time      `json:"generatedAt"`
+	UptimeSec   int64          `json:"uptimeSec"`
+	Totals      Totals         `json:"totals"`
+	Selection   Selection      `json:"selection"`
+	Breakdown   Breakdown      `json:"breakdown"`
+	Options     CompatOptions  `json:"options"`
+	Columns     []CompatColumn `json:"columns"`
+	Rows        []CompatRow    `json:"rows"`
+}
+
+type CompatOptions struct {
+	GroupBy        string `json:"groupBy"`
+	Usage          string `json:"usage"`
+	Limit          int    `json:"limit"`
+	MinTested      int    `json:"minTested"`
+	ExcludeUnknown bool   `json:"excludeUnknown"`
+}
+
+type CompatColumn struct {
+	Key        string `json:"key"`
+	Browser    string `json:"browser,omitempty"`
+	OS         string `json:"os,omitempty"`
+	DeviceType string `json:"deviceType,omitempty"`
+	Matched    int    `json:"matched"`
+	TestedAny  int    `json:"testedAny"`
+}
+
+type CompatCell struct {
+	Supported int `json:"supported"`
+	Tested    int `json:"tested"`
+}
+
+type CompatRow struct {
+	ID          string       `json:"id"`
+	Label       string       `json:"label"`
+	Description string       `json:"description,omitempty"`
+	Overall     CompatCell   `json:"overall"`
+	Cells       []CompatCell `json:"cells"`
+}
+
 type Totals struct {
 	Stored        int `json:"stored"`
 	TotalReceived int `json:"totalReceived"`
@@ -891,6 +932,61 @@ func (s *Store) Stats(now time.Time, filter StatsFilter) (StatsResponse, error) 
 	s.mu.Unlock()
 
 	return computeStats(now, startedAt, totals, reports, filter), nil
+}
+
+func (s *Store) Compat(now time.Time, filter StatsFilter, opts CompatOptions) (CompatResponse, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 12
+	}
+	if opts.Limit > 40 {
+		opts.Limit = 40
+	}
+
+	if s.mongo != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		storedCount, err := s.countReportsFromMongo(ctx)
+		if err != nil {
+			return CompatResponse{}, err
+		}
+		reports, err := s.loadReportsFromMongo(ctx)
+		if err != nil {
+			return CompatResponse{}, err
+		}
+
+		s.mu.Lock()
+		totals := Totals{
+			Stored:        storedCount,
+			TotalReceived: s.totalReceived,
+			Accepted:      s.totalAccepted,
+			Duplicates:    s.totalDuplicate,
+			RateLimited:   s.totalRateLimited,
+			Rejected:      s.totalRejected,
+		}
+		startedAt := s.startedAt
+		s.mu.Unlock()
+
+		return computeCompat(now, startedAt, totals, reports, filter, opts), nil
+	}
+
+	s.mu.Lock()
+	reports := make([]Report, 0, len(s.reports))
+	for _, stored := range s.reports {
+		reports = append(reports, stored.Report)
+	}
+	totals := Totals{
+		Stored:        len(s.reports),
+		TotalReceived: s.totalReceived,
+		Accepted:      s.totalAccepted,
+		Duplicates:    s.totalDuplicate,
+		RateLimited:   s.totalRateLimited,
+		Rejected:      s.totalRejected,
+	}
+	startedAt := s.startedAt
+	s.mu.Unlock()
+
+	return computeCompat(now, startedAt, totals, reports, filter, opts), nil
 }
 
 func computeStats(now time.Time, startedAt time.Time, totals Totals, reports []Report, filter StatsFilter) StatsResponse {
@@ -1171,6 +1267,377 @@ func computeStats(now time.Time, startedAt time.Time, totals Totals, reports []R
 	}
 }
 
+func computeCompat(now time.Time, startedAt time.Time, totals Totals, reports []Report, filter StatsFilter, opts CompatOptions) CompatResponse {
+	groupBy := strings.TrimSpace(strings.ToLower(opts.GroupBy))
+	switch groupBy {
+	case "device", "os_browser", "os", "browser", "device_type":
+		// ok
+	default:
+		groupBy = "device"
+	}
+
+	usage := strings.TrimSpace(strings.ToLower(opts.Usage))
+	switch usage {
+	case "any", "sampled", "renderable", "storage", "filterable":
+		// ok
+	default:
+		usage = "any"
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 12
+	}
+	if limit > 40 {
+		limit = 40
+	}
+
+	minTested := opts.MinTested
+	if minTested < 0 {
+		minTested = 0
+	}
+
+	supportByUsage := func(f WebGPUFormat) bool {
+		switch usage {
+		case "sampled":
+			return f.Sampled
+		case "renderable":
+			return f.Renderable
+		case "storage":
+			return f.Storage
+		case "filterable":
+			return f.Filterable != nil && *f.Filterable
+		case "any":
+			fallthrough
+		default:
+			return f.Sampled || f.Renderable || f.Storage
+		}
+	}
+
+	browserCounts := map[string]int{}
+	osCounts := map[string]int{}
+	countryCounts := map[string]int{}
+	deviceCounts := map[string]int{}
+	cpuCounts := map[string]int{}
+
+	type groupState struct {
+		Col  CompatColumn
+		Rows map[string]*CompatCell
+	}
+
+	buildGroupKey := func(r Report) (key string, deviceType string, osName string, browser string, hasUnknown bool) {
+		browser = "Unknown"
+		osName = "Unknown"
+		deviceType = "Unknown"
+		if r.Client != nil && r.Client.Parsed != nil {
+			if r.Client.Parsed.Browser != nil && r.Client.Parsed.Browser.Name != "" {
+				browser = r.Client.Parsed.Browser.Name
+			}
+			if r.Client.Parsed.OS != nil && r.Client.Parsed.OS.Name != "" {
+				osName = r.Client.Parsed.OS.Name
+			}
+			if r.Client.Parsed.Device != nil && r.Client.Parsed.Device.Type != "" {
+				deviceType = r.Client.Parsed.Device.Type
+			}
+		}
+
+		switch groupBy {
+		case "os_browser":
+			key = osName + "|" + browser
+			hasUnknown = osName == "Unknown" || browser == "Unknown"
+		case "os":
+			key = osName
+			hasUnknown = osName == "Unknown"
+		case "browser":
+			key = browser
+			hasUnknown = browser == "Unknown"
+		case "device_type":
+			key = deviceType
+			hasUnknown = deviceType == "Unknown"
+		case "device":
+			fallthrough
+		default:
+			key = deviceType + "|" + osName + "|" + browser
+			hasUnknown = deviceType == "Unknown" || osName == "Unknown" || browser == "Unknown"
+		}
+		return key, deviceType, osName, browser, hasUnknown
+	}
+
+	rowDefs := []struct {
+		ID          string
+		Label       string
+		Description string
+	}{
+		{ID: "astc", Label: "ASTC", Description: "ASTC block-compressed textures (common on mobile)."},
+		{ID: "astcHdr", Label: "ASTC HDR Profile", Description: "ASTC HDR decoding profile allowed (conditional on ASTC support)."},
+		{ID: "etc2", Label: "ETC2/EAC", Description: "ETC2/EAC block compression (common on Android/WebGL2)."},
+		{ID: "etc1", Label: "ETC1", Description: "Legacy ETC1 compression (WebGL-only / older devices)."},
+		{ID: "pvrtc", Label: "PVRTC", Description: "PVRTC compression (common on iOS)."},
+		{ID: "bc13", Label: "BC1–BC3 (S3TC/DXT)", Description: "BC1/2/3 desktop-friendly compression (S3TC/DXT)."},
+		{ID: "rgtc", Label: "BC4–BC5 (RGTC)", Description: "BC4/5 (RGTC), useful for normals/masks."},
+		{ID: "bc6h", Label: "BC6H (HDR)", Description: "BC6H HDR compression (BPTC)."},
+		{ID: "bc7", Label: "BC7 (BPTC)", Description: "BC7 high-quality compression (BPTC)."},
+	}
+
+	groups := map[string]*groupState{}
+	overall := map[string]*CompatCell{}
+
+	matched := 0
+	for _, r := range reports {
+		if !matchesStatsFilter(r, filter) {
+			continue
+		}
+
+		key, deviceType, osName, browser, hasUnknown := buildGroupKey(r)
+		if opts.ExcludeUnknown && hasUnknown {
+			continue
+		}
+
+		matched += 1
+
+		// Client breakdowns
+		if browser != "" {
+			if browser == "Unknown" {
+				browserCounts["Unknown"] += 1
+			} else {
+				browserCounts[browser] += 1
+			}
+		}
+		if osName != "" {
+			if osName == "Unknown" {
+				osCounts["Unknown"] += 1
+			} else {
+				osCounts[osName] += 1
+			}
+		}
+		if deviceType != "" {
+			if deviceType == "Unknown" {
+				deviceCounts["Unknown"] += 1
+			} else {
+				deviceCounts[deviceType] += 1
+			}
+		}
+		if arch := strings.TrimSpace(reportCPUArch(r)); arch != "" {
+			cpuCounts[arch] += 1
+		} else {
+			cpuCounts["Unknown"] += 1
+		}
+
+		// Geo
+		if r.Geo != nil && r.Geo.CountryCode != "" {
+			countryCounts[r.Geo.CountryCode] += 1
+		} else {
+			countryCounts["Unknown"] += 1
+		}
+
+		g := groups[key]
+		if g == nil {
+			col := CompatColumn{Key: key}
+			switch groupBy {
+			case "os_browser":
+				col.OS = osName
+				col.Browser = browser
+			case "os":
+				col.OS = osName
+			case "browser":
+				col.Browser = browser
+			case "device_type":
+				col.DeviceType = deviceType
+			case "device":
+				fallthrough
+			default:
+				col.DeviceType = deviceType
+				col.OS = osName
+				col.Browser = browser
+			}
+
+			g = &groupState{
+				Col:  col,
+				Rows: map[string]*CompatCell{},
+			}
+			groups[key] = g
+		}
+		g.Col.Matched += 1
+		if len(r.WebGPU.Formats) > 0 {
+			g.Col.TestedAny += 1
+		}
+
+		// Scan format list (unified list: WebGPU when available, else WebGL-derived).
+		astcTested := false
+		astcSupported := false
+		astcHdrSupported := false
+		etc2Tested := false
+		etc2Supported := false
+		etc1Tested := false
+		etc1Supported := false
+		pvrtcTested := false
+		pvrtcSupported := false
+		bc13Tested := false
+		bc13Supported := false
+		rgtcTested := false
+		rgtcSupported := false
+		bc6hTested := false
+		bc6hSupported := false
+		bc7Tested := false
+		bc7Supported := false
+
+		for _, f := range r.WebGPU.Formats {
+			supported := supportByUsage(f)
+			name := f.Format
+
+			switch {
+			case strings.HasPrefix(name, "astc-"):
+				astcTested = true
+				if supported {
+					astcSupported = true
+					if f.HDR {
+						astcHdrSupported = true
+					}
+				}
+			case strings.HasPrefix(name, "etc2-") || strings.HasPrefix(name, "eac-"):
+				etc2Tested = true
+				if supported {
+					etc2Supported = true
+				}
+			case strings.HasPrefix(name, "etc1-"):
+				etc1Tested = true
+				if supported {
+					etc1Supported = true
+				}
+			case strings.HasPrefix(name, "pvrtc-"):
+				pvrtcTested = true
+				if supported {
+					pvrtcSupported = true
+				}
+			case strings.HasPrefix(name, "bc1-") || strings.HasPrefix(name, "bc2-") || strings.HasPrefix(name, "bc3-"):
+				bc13Tested = true
+				if supported {
+					bc13Supported = true
+				}
+			case strings.HasPrefix(name, "bc4-") || strings.HasPrefix(name, "bc5-"):
+				rgtcTested = true
+				if supported {
+					rgtcSupported = true
+				}
+			case strings.HasPrefix(name, "bc6h-"):
+				bc6hTested = true
+				if supported {
+					bc6hSupported = true
+				}
+			case strings.HasPrefix(name, "bc7-"):
+				bc7Tested = true
+				if supported {
+					bc7Supported = true
+				}
+			}
+		}
+
+		inc := func(rowID string, tested bool, supported bool) {
+			if !tested {
+				return
+			}
+			cell := g.Rows[rowID]
+			if cell == nil {
+				cell = &CompatCell{}
+				g.Rows[rowID] = cell
+			}
+			cell.Tested += 1
+			if supported {
+				cell.Supported += 1
+			}
+
+			oc := overall[rowID]
+			if oc == nil {
+				oc = &CompatCell{}
+				overall[rowID] = oc
+			}
+			oc.Tested += 1
+			if supported {
+				oc.Supported += 1
+			}
+		}
+
+		inc("astc", astcTested, astcSupported)
+		inc("astcHdr", astcSupported, astcHdrSupported)
+		inc("etc2", etc2Tested, etc2Supported)
+		inc("etc1", etc1Tested, etc1Supported)
+		inc("pvrtc", pvrtcTested, pvrtcSupported)
+		inc("bc13", bc13Tested, bc13Supported)
+		inc("rgtc", rgtcTested, rgtcSupported)
+		inc("bc6h", bc6hTested, bc6hSupported)
+		inc("bc7", bc7Tested, bc7Supported)
+	}
+
+	columns := make([]CompatColumn, 0, len(groups))
+	for _, g := range groups {
+		if minTested > 0 && g.Col.TestedAny < minTested {
+			continue
+		}
+		columns = append(columns, g.Col)
+	}
+	sort.Slice(columns, func(i, j int) bool {
+		if columns[i].Matched == columns[j].Matched {
+			return columns[i].Key < columns[j].Key
+		}
+		return columns[i].Matched > columns[j].Matched
+	})
+	if len(columns) > limit {
+		columns = columns[:limit]
+	}
+
+	outRows := make([]CompatRow, 0, len(rowDefs))
+	for _, def := range rowDefs {
+		row := CompatRow{
+			ID:          def.ID,
+			Label:       def.Label,
+			Description: def.Description,
+			Cells:       make([]CompatCell, 0, len(columns)),
+		}
+		if oc := overall[def.ID]; oc != nil {
+			row.Overall = *oc
+		}
+		for _, col := range columns {
+			g := groups[col.Key]
+			if g == nil {
+				row.Cells = append(row.Cells, CompatCell{})
+				continue
+			}
+			if cell := g.Rows[def.ID]; cell != nil {
+				row.Cells = append(row.Cells, *cell)
+			} else {
+				row.Cells = append(row.Cells, CompatCell{})
+			}
+		}
+		outRows = append(outRows, row)
+	}
+
+	return CompatResponse{
+		GeneratedAt: now,
+		UptimeSec:   int64(now.Sub(startedAt).Seconds()),
+		Totals:      totals,
+		Selection: Selection{
+			Matched: matched,
+			Filter:  filter,
+		},
+		Breakdown: Breakdown{
+			Browsers:    sortCounts(browserCounts),
+			OS:          sortCounts(osCounts),
+			Countries:   sortCounts(countryCounts),
+			DeviceTypes: sortCounts(deviceCounts),
+			CPUArch:     sortCounts(cpuCounts),
+		},
+		Options: CompatOptions{
+			GroupBy:        groupBy,
+			Usage:          usage,
+			Limit:          limit,
+			MinTested:      minTested,
+			ExcludeUnknown: opts.ExcludeUnknown,
+		},
+		Columns: columns,
+		Rows:    outRows,
+	}
+}
+
 type webglLimitsCounter struct {
 	maxTextureSize               map[string]int
 	maxCubeMapTextureSize        map[string]int
@@ -1414,6 +1881,47 @@ func parseStatsFilter(q url.Values) StatsFilter {
 	return f
 }
 
+func parseCompatOptions(q url.Values) CompatOptions {
+	limit := 12
+	if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil {
+			limit = v
+		}
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 40 {
+		limit = 40
+	}
+
+	minTested := 0
+	if raw := strings.TrimSpace(q.Get("minTested")); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil {
+			minTested = v
+		}
+	}
+	if minTested < 0 {
+		minTested = 0
+	}
+	if minTested > 10000 {
+		minTested = 10000
+	}
+
+	excludeUnknown := false
+	if v := parseBoolPtr(q.Get("excludeUnknown")); v != nil && *v {
+		excludeUnknown = true
+	}
+
+	return CompatOptions{
+		GroupBy:        strings.TrimSpace(q.Get("groupBy")),
+		Usage:          strings.TrimSpace(q.Get("usage")),
+		Limit:          limit,
+		MinTested:      minTested,
+		ExcludeUnknown: excludeUnknown,
+	}
+}
+
 func parseBoolPtr(raw string) *bool {
 	s := strings.TrimSpace(strings.ToLower(raw))
 	if s == "" {
@@ -1539,7 +2047,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("Serving on http://%s (open / and /stats)", serverListenHint(*addr))
+	log.Printf("Serving on http://%s (open /, /stats, /compat)", serverListenHint(*addr))
 	log.Fatal(srv.ListenAndServe())
 }
 
@@ -1573,6 +2081,8 @@ func staticHandler() http.Handler {
 		switch r.URL.Path {
 		case "/stats":
 			r.URL.Path = "/stats.html"
+		case "/compat":
+			r.URL.Path = "/compat.html"
 		}
 		// Dev-friendly: avoid stale JS/HTML.
 		w.Header().Set("Cache-Control", "no-store")
@@ -1656,6 +2166,20 @@ func apiHandler(store *Store) http.Handler {
 				return
 			}
 			writeJSON(w, http.StatusOK, stats)
+			return
+		case "/api/compat":
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+				return
+			}
+			filter := parseStatsFilter(r.URL.Query())
+			opts := parseCompatOptions(r.URL.Query())
+			compat, err := store.Compat(time.Now(), filter, opts)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "compat unavailable", "details": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, compat)
 			return
 		case "/api/report":
 			if r.Method != http.MethodPost {

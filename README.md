@@ -24,6 +24,7 @@ Open:
 
 - `http://localhost:8080` (detector)
 - `http://localhost:8080/stats` or `http://localhost:8080/stats.html` (statistics)
+- `http://localhost:8080/compat` or `http://localhost:8080/compat.html` (compatibility matrix)
 
 The detector auto-submits results to the backend (`POST /api/report`) and the stats page reads aggregates from `GET /api/stats`.
 
